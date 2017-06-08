@@ -41,4 +41,8 @@
         </dependency>
     </dependencies>
 
+    <modules>
+        <module>crawler</module>
+    </modules>
+
 </project>
