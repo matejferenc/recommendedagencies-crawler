@@ -7,6 +7,9 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Application {
 
@@ -21,10 +24,24 @@ public class Application {
         File file = new File(classLoader.getResource("main_data.json").getFile());
         ObjectMapper mapper = new ObjectMapper();
         HashMap map = mapper.readValue(file, HashMap.class);
-        ((List) map.get("response"))
-                .forEach(company -> {
-                    String page = HttpUtils.get((String)((Map) company).get("url"));
-                });
+
+        List<String> collect = ((List<HashMap>) map.get("response")).stream()
+                .map(company -> ((Map) company).get("title"))
+                .map(title -> (String) title)
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
+                .entrySet()
+                .stream()
+                .filter(p -> p.getValue() > 1)
+                .map(e -> e.getKey())
+                .collect(Collectors.toList());
+
+
+//        ((List) map.get("response"))
+//                .forEach(company -> {
+//                    String title = ((String)((Map) company).get("title"));
+//                    String pageUrl = HttpUtils.get((String)((Map) company).get("url"));
+////                    String page = HttpUtils.get(pageUrl);
+//                });
         boolean stop = true;
     }
 
