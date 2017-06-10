@@ -9,4 +9,6 @@ public class Company {
     public Overview overview;
 
     public List<Staff> staff;
+
+    public String name;
 }

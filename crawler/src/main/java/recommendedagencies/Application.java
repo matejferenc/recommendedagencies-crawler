@@ -1,11 +1,13 @@
 package recommendedagencies;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.poi.common.usermodel.HyperlinkType;
+import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
+import org.apache.poi.ss.usermodel.Hyperlink;
+import org.apache.poi.ss.util.CellAddress;
+import org.apache.poi.xssf.usermodel.*;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.*;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -19,12 +21,202 @@ public class Application {
     private static final String BASE_URL = "http://search.recommendedagencies.com/api/v1/search?services[]=digital/web-development/&offset=";
 
     private static final List<String> subPages = Arrays.asList("", "clients", "staff", "finances", "rate-card", "contact");
+    private static XSSFCreationHelper helper;
 
-    public static void main(String[] args) throws IOException {
-        createModel();
+    public static void main(String[] args) throws IOException, InvalidFormatException {
+        List<Company> model = createModel();
+        writeToExcel(model);
     }
 
-    private static void createModel() throws IOException {
+    private static void writeToExcel(List<Company> model) throws IOException, InvalidFormatException {
+        XSSFWorkbook workbook = new XSSFWorkbook();
+        helper = new XSSFCreationHelper(workbook);
+        XSSFSheet globalSheet = workbook.createSheet("Company");
+        XSSFRow globalHeaderRow = globalSheet.createRow(0);
+        writeGlobalHeaders(globalHeaderRow, globalSheet);
+
+        XSSFSheet staffSheet = workbook.createSheet("Staff");
+        XSSFRow staffHeaderRow = staffSheet.createRow(0);
+        writeStaffHeaders(staffHeaderRow, staffSheet);
+
+        XSSFSheet addressSheet = workbook.createSheet("Addresses");
+        XSSFRow addressHeaderRow = addressSheet.createRow(0);
+        writeAddressHeaders(addressHeaderRow, addressSheet);
+
+        int staffRowIndex = 1;
+
+        int contactAddressRowIndex = 1;
+
+        for (int i = 0; i < model.size(); i++) {
+            Company company = model.get(i);
+            XSSFRow row = globalSheet.createRow(i + 1);
+
+            int columnIndex = 0;
+            writeCell(row, columnIndex++, company.name);
+            XSSFCell companyCell = row.getCell(0);
+
+            int firstContactAddressRowIndex = contactAddressRowIndex;
+            for (ContactAddress contactAddress : company.contact.contactAddresses) {
+                int addressColumnIndex = 0;
+                XSSFRow addressSheetRow = addressSheet.createRow(contactAddressRowIndex++);
+//                writeCell(addressSheetRow, addressColumnIndex++, company.name);
+                writeCompanyLink(addressSheetRow, addressColumnIndex++, company.name, companyCell);
+                writeCell(addressSheetRow, addressColumnIndex++, contactAddress.address);
+                writeCell(addressSheetRow, addressColumnIndex++, contactAddress.contactEmail);
+                writeCell(addressSheetRow, addressColumnIndex++, contactAddress.phoneNumber);
+            }
+            XSSFCell firstContactAddressCell = null;
+            if (company.contact.contactAddresses!= null && !company.contact.contactAddresses.isEmpty()) {
+                firstContactAddressCell = addressSheet.getRow(firstContactAddressRowIndex).getCell(0);
+            }
+
+            writeAddressLink(row, columnIndex++, company.overview.location, firstContactAddressCell);
+
+            int firstStaffRowIndex = staffRowIndex;
+            for (Staff staff : company.staff) {
+                int staffColumnIndex = 0;
+                XSSFRow staffSheetRow = staffSheet.createRow(staffRowIndex++);
+                writeCompanyLink(staffSheetRow, staffColumnIndex++, company.name, companyCell);
+                writeCell(staffSheetRow, staffColumnIndex++, staff.name);
+                writeCell(staffSheetRow, staffColumnIndex++, staff.position);
+                writeCell(staffSheetRow, staffColumnIndex++, staff.contact);
+            }
+            XSSFCell firstStaffCell = null;
+            if (company.staff != null && !company.staff.isEmpty()) {
+                firstStaffCell = staffSheet.getRow(firstStaffRowIndex).getCell(0);
+            }
+
+            writeStaffLink(row, columnIndex++, company.overview.totalStaff, firstStaffCell);
+            writeCell(row, columnIndex++, company.overview.yearEstablished);
+            writeLink(row, columnIndex++, company.contact.website);
+            writeCell(row, columnIndex++, company.contact.contactEmail);
+            writeLink(row, columnIndex++, company.contact.twitter);
+            writeLink(row, columnIndex++, company.contact.facebook);
+            writeLink(row, columnIndex++, company.contact.linkedIn);
+
+
+        }
+        OutputStream stream = new FileOutputStream("output.xlsx");
+        workbook.write(stream);
+    }
+
+    private static void writeAddressLink(XSSFRow row, int i, String location, XSSFCell firstContactAddressCell) {
+        if (firstContactAddressCell == null) {
+            XSSFCell cell = row.createCell(i);
+            cell.setCellValue(location);
+        } else {
+            XSSFCell cell = row.createCell(i);
+            Hyperlink hyperlink = helper.createHyperlink(HyperlinkType.DOCUMENT);
+            hyperlink.setAddress("'" + firstContactAddressCell.getSheet().getSheetName() + "'!" + firstContactAddressCell.getAddress().toString());
+
+            if (location == null || location.isEmpty()) {
+                location = "N/A";
+            }
+
+            hyperlink.setLabel(location);
+            cell.setHyperlink(hyperlink);
+            cell.setCellValue(location);
+        }
+    }
+
+    private static void writeAddressHeaders(XSSFRow headerRow, XSSFSheet staffSheet) {
+        int columnIndex = 0;
+        writeCell(headerRow, columnIndex++, "Company");
+        writeCell(headerRow, columnIndex++, "Address");
+        writeCell(headerRow, columnIndex++, "Contact email");
+        writeCell(headerRow, columnIndex++, "Phone number");
+
+        staffSheet.setColumnWidth(0, 256 * 20);
+        staffSheet.setColumnWidth(1, 256 * 100);
+        staffSheet.setColumnWidth(2, 256 * 30);
+        staffSheet.setColumnWidth(3, 256 * 20);
+    }
+
+    private static void writeStaffLink(XSSFRow row, int i, String totalStaff, XSSFCell firstStaffCell) {
+        if (firstStaffCell == null) {
+            XSSFCell cell = row.createCell(i);
+            cell.setCellValue(totalStaff);
+        } else {
+            XSSFCell cell = row.createCell(i);
+            Hyperlink hyperlink = helper.createHyperlink(HyperlinkType.DOCUMENT);
+            hyperlink.setAddress("'" + firstStaffCell.getSheet().getSheetName() + "'!" + firstStaffCell.getAddress().toString());
+
+            if (totalStaff == null || totalStaff.isEmpty()) {
+                totalStaff = "N/A";
+            }
+
+            hyperlink.setLabel(totalStaff);
+            cell.setHyperlink(hyperlink);
+            cell.setCellValue(totalStaff);
+        }
+    }
+
+    private static void writeCompanyLink(XSSFRow row, int i, String value, XSSFCell companyCell) {
+        XSSFCell cell = row.createCell(i);
+        Hyperlink hyperlink = helper.createHyperlink(HyperlinkType.DOCUMENT);
+        hyperlink.setAddress("'" + companyCell.getSheet().getSheetName() + "'!" + companyCell.getAddress().toString());
+        hyperlink.setLabel(value);
+        cell.setHyperlink(hyperlink);
+        cell.setCellValue(value);
+    }
+
+    private static void writeStaffHeaders(XSSFRow headerRow, XSSFSheet staffSheet) {
+        int columnIndex = 0;
+        writeCell(headerRow, columnIndex++, "Company");
+        writeCell(headerRow, columnIndex++, "Name");
+        writeCell(headerRow, columnIndex++, "Position");
+        writeCell(headerRow, columnIndex++, "Contact");
+
+        staffSheet.setColumnWidth(0, 256 * 20);
+        staffSheet.setColumnWidth(1, 256 * 20);
+        staffSheet.setColumnWidth(2, 256 * 30);
+        staffSheet.setColumnWidth(3, 256 * 20);
+    }
+
+    private static void writeGlobalHeaders(XSSFRow headerRow, XSSFSheet globalSheet) {
+        int columnIndex = 0;
+        writeCell(headerRow, columnIndex++, "Name");
+        writeCell(headerRow, columnIndex++, "Location");
+        writeCell(headerRow, columnIndex++, "Total staff");
+        writeCell(headerRow, columnIndex++, "Year established");
+        writeCell(headerRow, columnIndex++, "Website");
+        writeCell(headerRow, columnIndex++, "Contact email");
+        writeCell(headerRow, columnIndex++, "Twitter");
+        writeCell(headerRow, columnIndex++, "Facebook");
+        writeCell(headerRow, columnIndex++, "LinkedIn");
+//        for (int i = 0; i < columnIndex; i++) {
+//            globalSheet.autoSizeColumn(i);
+//        }
+        globalSheet.setColumnWidth(0, 256 * 20);
+        globalSheet.setColumnWidth(1, 256 * 20);
+        globalSheet.setColumnWidth(2, 256 * 10);
+        globalSheet.setColumnWidth(3, 256 * 15);
+        globalSheet.setColumnWidth(4, 256 * 30);
+        globalSheet.setColumnWidth(5, 256 * 30);
+        globalSheet.setColumnWidth(6, 256 * 30);
+        globalSheet.setColumnWidth(7, 256 * 30);
+        globalSheet.setColumnWidth(8, 256 * 30);
+        globalSheet.setColumnWidth(9, 256 * 30);
+    }
+
+    private static void writeCell(XSSFRow row, int i, String value) {
+        XSSFCell cell = row.createCell(i);
+        cell.setCellValue(value);
+    }
+
+    private static void writeLink(XSSFRow row, int i, String value) {
+        if (value == null) {
+            value = "";
+        }
+        XSSFCell cell = row.createCell(i);
+        Hyperlink hyperlink = helper.createHyperlink(HyperlinkType.URL);
+        hyperlink.setAddress(value);
+        hyperlink.setLabel(value);
+        cell.setHyperlink(hyperlink);
+        cell.setCellValue(value);
+    }
+
+    private static List<Company> createModel() throws IOException {
         HashMap map = readMainData();
         File companyDirectory = new File("companies");
         companyDirectory.mkdir();
@@ -33,7 +225,7 @@ public class Application {
 
         List<HashMap> responseList = (List<HashMap>) map.get("response");
 //        int size = responseList.size();
-        int size = 9;
+        int size = 10;
         for (int i = 0; i < size; i++) {
             HashMap company = responseList.get(i);
             String id = ((String) company.get("id"));
@@ -42,6 +234,7 @@ public class Application {
             File companyFolder = new File(companyDirectory, id);
 
             Company c = new Company();
+            c.name = companyTitle;
             companies.add(c);
 
             subPages.forEach(subPage -> {
@@ -58,6 +251,7 @@ public class Application {
             });
             System.out.println("Company " + companyTitle + " finished");
         }
+        return companies;
     }
 
     private static void parse(String subPage, String pageContent, Company c) {
@@ -94,15 +288,42 @@ public class Application {
         Contact contact = new Contact();
         c.contact = contact;
 
-        contact.website = website;
+        contact.website = fixIllegalCharacters(fixWww(prependProtocol(website)));
         contact.contactEmail = contactEmail;
-        contact.twitter = twitter;
-        contact.facebook = facebook;
-        contact.linkedIn = linkedIn;
+        contact.twitter = fixIllegalCharacters(fixWww(prependProtocol(twitter)));
+        contact.facebook = fixIllegalCharacters(fixWww(prependProtocol(facebook)));
+        contact.linkedIn = fixIllegalCharacters(fixWww(prependProtocol(linkedIn)));
 
         List<ContactAddress> addresses = parseAddresses(pageContent);
 
         contact.contactAddresses = addresses;
+    }
+
+    private static String fixIllegalCharacters(String url) {
+        if (url != null && !url.isEmpty() && url.contains(",")) {
+            return url.replace(",", ".");
+        } else {
+            return url;
+        }
+    }
+
+    private static String fixWww(String url) {
+        if (url != null && !url.isEmpty() && url.matches(".*https?://[^w].*")) {
+            return url.replace("://", "://www.");
+        } else {
+            return url;
+        }
+    }
+
+    private static String prependProtocol(String url) {
+        if (url != null && url.trim().equals("http://")) {
+            return null;
+        }
+        if (url != null && !url.isEmpty() && !url.startsWith("http")) {
+            return "http://" + url;
+        } else {
+            return url;
+        }
     }
 
     private static List<ContactAddress> parseAddresses(String pageContent) {
@@ -132,7 +353,7 @@ public class Application {
             String a1 = Pattern.compile("</td>.*", Pattern.DOTALL).matcher(addressUnparsed).replaceAll("");
             String a2 = Pattern.compile("\\s*<br/>\\s*", Pattern.DOTALL).matcher(a1).replaceFirst("");
             String[] addressParts = a2.split("\\s*<br/>\\s*");
-            String address = String.join(" ", addressParts);
+            String address = String.join(" ", addressParts).trim();
             System.out.println(address);
 
             String contactEmail = null;
@@ -144,6 +365,9 @@ public class Application {
             }
 
             String phoneNumber = Pattern.compile("\\s*<br/>\\s*", Pattern.DOTALL).matcher(phoneNumberUnparsed).replaceAll("").trim();
+            if (phoneNumber.contains("The agency has not filled in this phone number.")) {
+                phoneNumber = null;
+            }
             System.out.println(phoneNumber);
             start = endTdIndex;
 
@@ -166,13 +390,13 @@ public class Application {
         if (matcher.find()) {
             String field = matcher.group(1);
             System.out.println(field);
-            return field;
+            return field.trim();
         }
         return null;
     }
 
     private static String parseTwitter(String pageContent) {
-        Pattern pattern = Pattern.compile("<strong>Twitter</strong>\\s*\":\\s*\"\\s*<a href=\"([^\"]*)\"");
+        Pattern pattern = Pattern.compile("<strong>Twitter</strong>\\s*:\\s*<a href=\"([^\"]*)\"");
         Matcher matcher = pattern.matcher(pageContent);
         if (matcher.find()) {
             String twitter = matcher.group(1);
@@ -194,6 +418,9 @@ public class Application {
             String position = matcher.group(2).trim();
             System.out.println(position);
             String tel = matcher.group(3);
+            if (tel.startsWith("T: ")){
+                tel = tel.replace("T: ", "");
+            }
             System.out.println(tel);
             Staff staff = new Staff();
             staff.name = name;
@@ -229,37 +456,6 @@ public class Application {
             return field;
         }
         return null;
-    }
-
-    private static void downloadPages() throws IOException {
-        HashMap map = readMainData();
-        File companyDirectory = new File("companies");
-        companyDirectory.mkdir();
-
-        List<HashMap> responseList = (List<HashMap>) map.get("response");
-        for (int i = 0; i < responseList.size(); i++) {
-            HashMap company = responseList.get(i);
-            String id = ((String) company.get("id"));
-            String companyUrl = (String) company.get("url");
-            String companyTitle = (String) company.get("title");
-            System.out.println("Page " + companyTitle + " started");
-            File companyFolder = new File(companyDirectory, id);
-            companyFolder.mkdir();
-            subPages.forEach(subPage -> {
-                String pageUrl = companyUrl + subPage;
-                String pageSourceCode = HttpUtils.get(pageUrl);
-                File subPageSourceCodeFile = new File(companyFolder, subPage + ".html");
-                try {
-                    PrintWriter writer = new PrintWriter(subPageSourceCodeFile);
-                    writer.print(pageSourceCode);
-                } catch (FileNotFoundException e) {
-                    throw new IllegalStateException(e);
-                }
-                System.out.println("Page " + subPage + " downloaded");
-            });
-            System.out.println("Page " + companyTitle + " finished");
-        }
-        boolean stop = true;
     }
 
     private static HashMap readMainData() throws IOException {
