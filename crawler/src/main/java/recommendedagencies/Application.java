@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.common.usermodel.HyperlinkType;
 import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.ss.usermodel.Hyperlink;
-import org.apache.poi.ss.util.CellAddress;
 import org.apache.poi.xssf.usermodel.*;
 
 import java.io.*;
@@ -22,9 +21,13 @@ public class Application {
 
     private static final List<String> subPages = Arrays.asList("", "clients", "staff", "finances", "rate-card", "contact");
     private static XSSFCreationHelper helper;
+    private static File companyFolder;
 
     public static void main(String[] args) throws IOException, InvalidFormatException {
         List<Company> model = createModel();
+        long count = model.stream().filter(company -> company.staff.size() > 0).count();
+        System.out.println(count);
+        model.stream().filter(company -> company.staff.size() > 0).forEach(company -> System.out.println(company.id));
         writeToExcel(model);
     }
 
@@ -79,7 +82,10 @@ public class Application {
                 writeCompanyLink(staffSheetRow, staffColumnIndex++, company.name, companyCell);
                 writeCell(staffSheetRow, staffColumnIndex++, staff.name);
                 writeCell(staffSheetRow, staffColumnIndex++, staff.position);
-                writeCell(staffSheetRow, staffColumnIndex++, staff.contact);
+                writeCell(staffSheetRow, staffColumnIndex++, staff.directDial);
+                writeCell(staffSheetRow, staffColumnIndex++, staff.mobile);
+                writeCell(staffSheetRow, staffColumnIndex++, staff.email);
+                writeLink(staffSheetRow, staffColumnIndex++, staff.linkedIn);
             }
             XSSFCell firstStaffCell = null;
             if (company.staff != null && !company.staff.isEmpty()) {
@@ -165,12 +171,18 @@ public class Application {
         writeCell(headerRow, columnIndex++, "Company");
         writeCell(headerRow, columnIndex++, "Name");
         writeCell(headerRow, columnIndex++, "Position");
-        writeCell(headerRow, columnIndex++, "Contact");
+        writeCell(headerRow, columnIndex++, "Direct Dial");
+        writeCell(headerRow, columnIndex++, "Mobile");
+        writeCell(headerRow, columnIndex++, "Email");
+        writeCell(headerRow, columnIndex++, "LinkedIn");
 
         staffSheet.setColumnWidth(0, 256 * 20);
         staffSheet.setColumnWidth(1, 256 * 20);
         staffSheet.setColumnWidth(2, 256 * 30);
         staffSheet.setColumnWidth(3, 256 * 20);
+        staffSheet.setColumnWidth(4, 256 * 20);
+        staffSheet.setColumnWidth(5, 256 * 30);
+        staffSheet.setColumnWidth(6, 256 * 30);
     }
 
     private static void writeGlobalHeaders(XSSFRow headerRow, XSSFSheet globalSheet) {
@@ -224,17 +236,18 @@ public class Application {
         List<Company> companies = new ArrayList<>();
 
         List<HashMap> responseList = (List<HashMap>) map.get("response");
-//        int size = responseList.size();
-        int size = 10;
+        int size = responseList.size();
+//        int size = 10;
         for (int i = 0; i < size; i++) {
             HashMap company = responseList.get(i);
             String id = ((String) company.get("id"));
             String companyTitle = (String) company.get("title");
             System.out.println("Company " + companyTitle + " started");
-            File companyFolder = new File(companyDirectory, id);
+            companyFolder = new File(companyDirectory, id);
 
             Company c = new Company();
             c.name = companyTitle;
+            c.id = id;
             companies.add(c);
 
             subPages.forEach(subPage -> {
@@ -410,15 +423,26 @@ public class Application {
         List<Staff> staffs = new ArrayList<>();
         c.staff = staffs;
 
-        Pattern pattern = Pattern.compile("<div class=\"item half[^>]*>\\s*<div[^>]*>\\s*<a[^>]*>\\s*<img[^>]*>\\s*</a>\\s*</div>\\s*<h2>\\s*<a href=[^>]+>([^<]+)</a>\\s*</h2>\\s*<h3>\\s*([^<]*)\\s*</h3>\\s*<p>([^<]*)</p>");
+        Pattern pattern = Pattern.compile("<div class=\"item half[^>]*>\\s*<div[^>]*>\\s*<a[^>]*>\\s*<img[^>]*>\\s*</a>\\s*</div>\\s*<h2>\\s*<a href=\"([^\"]+)\">([^<]+)</a>\\s*</h2>\\s*<h3>\\s*([^<]*)\\s*</h3>(?:\\s*<p>([^<]*)</p>)?");
         Matcher matcher = pattern.matcher(pageContent);
         while (matcher.find()) {
-            String name = matcher.group(1);
+            String url = matcher.group(1);
+
+            Pattern pat = Pattern.compile("http://www.recommendedagencies.com/([^/]+)/staff/(\\d+)/");
+            Matcher mat = pat.matcher(url);
+            String staffId;
+            if (mat.find()) {
+                staffId = mat.group(2);
+            } else {
+                throw new IllegalStateException("id not found in url " + url);
+            }
+
+            String name = matcher.group(2);
             System.out.println(name);
-            String position = matcher.group(2).trim();
+            String position = matcher.group(3).trim();
             System.out.println(position);
-            String tel = matcher.group(3);
-            if (tel.startsWith("T: ")){
+            String tel = matcher.group(4);
+            if (tel != null && tel.startsWith("T: ")){
                 tel = tel.replace("T: ", "");
             }
             System.out.println(tel);
@@ -426,7 +450,75 @@ public class Application {
             staff.name = name;
             staff.position = position;
             staff.contact = tel;
+            staff.id = staffId;
             staffs.add(staff);
+        }
+
+        File staffFolder = new File(companyFolder, "staff");
+        if (staffFolder.exists() && staffFolder.isDirectory()) {
+            File[] files = staffFolder.listFiles();
+            if (files.length != staffs.size()) {
+                throw new IllegalStateException("Number of staff differ for " + c.name);
+            }
+            for (Staff staff : staffs) {
+                File staffDetailFile = new File(staffFolder, staff.id + ".html");
+                String pageSourceCode;
+                try {
+                    byte[] bytes = Files.readAllBytes(staffDetailFile.toPath());
+                    pageSourceCode = new String(bytes, "UTF-8").replaceAll("&amp;", "&");
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+                parseStaffDetail(pageSourceCode, staff);
+            }
+        } else {
+            if (staffs.size() > 0) {
+                throw new IllegalStateException("Number of staff must be 0 for " + c.name);
+            }
+        }
+    }
+
+    private static void parseStaffDetail(String pageSourceCode, Staff staff) {
+        parseDirectDial(pageSourceCode, staff);
+        parseMobile(pageSourceCode, staff);
+        parseEmail(pageSourceCode, staff);
+        parseLinkedIn(pageSourceCode, staff);
+    }
+
+    private static void parseLinkedIn(String pageSourceCode, Staff staff) {
+        Pattern pattern = Pattern.compile("Find  on LinkedIn\" href=\"([^\"]+)\"");
+        Matcher matcher = pattern.matcher(pageSourceCode);
+        if (matcher.find()) {
+            String linkedIn = matcher.group(1).trim();
+            if (linkedIn.contains("%")) {
+                boolean stop = true;
+                return;
+            }
+            staff.linkedIn = linkedIn;
+        }
+    }
+
+    private static void parseEmail(String pageSourceCode, Staff staff) {
+        Pattern pattern = Pattern.compile("\"mailto:([^\"]+)\"");
+        Matcher matcher = pattern.matcher(pageSourceCode);
+        if (matcher.find()) {
+            staff.email = matcher.group(1).trim();
+        }
+    }
+
+    private static void parseDirectDial(String pageSourceCode, Staff staff) {
+        Pattern pattern = Pattern.compile("<td>Direct Dial</td>\\s*<td itemprop=\"telephone\">\\s*([^<]+)</td>");
+        Matcher matcher = pattern.matcher(pageSourceCode);
+        if (matcher.find()) {
+            staff.directDial = matcher.group(1).trim();
+        }
+    }
+
+    private static void parseMobile(String pageSourceCode, Staff staff) {
+        Pattern pattern = Pattern.compile("<td>Mobile</td>\\s*<td itemprop=\"telephone\">\\s*([^<]+)</td>");
+        Matcher matcher = pattern.matcher(pageSourceCode);
+        if (matcher.find()) {
+            staff.mobile = matcher.group(1).trim();
         }
     }
 

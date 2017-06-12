@@ -11,4 +11,6 @@ public class Company {
     public List<Staff> staff;
 
     public String name;
+
+    public String id;
 }
