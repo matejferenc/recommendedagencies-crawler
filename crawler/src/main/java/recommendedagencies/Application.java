@@ -7,6 +7,10 @@ import org.apache.poi.ss.usermodel.Hyperlink;
 import org.apache.poi.xssf.usermodel.*;
 
 import java.io.*;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -490,11 +494,19 @@ public class Application {
         Matcher matcher = pattern.matcher(pageSourceCode);
         if (matcher.find()) {
             String linkedIn = matcher.group(1).trim();
-            if (linkedIn.contains("%")) {
-                boolean stop = true;
-                return;
+//            if (linkedIn.contains("%")) {
+//                boolean stop = true;
+//                return;
+//            }
+            try {
+                URL url = new URL(linkedIn);
+                URI uri = new URI(url.getProtocol(), url.getUserInfo(), url.getHost(), url.getPort(), url.getPath(), url.getQuery(), url.getRef());
+//                String s = new URI(linkedIn).toString();
+                staff.linkedIn = uri.toString();
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
             }
-            staff.linkedIn = linkedIn;
+
         }
     }
 
